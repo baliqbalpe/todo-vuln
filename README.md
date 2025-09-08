@@ -31,7 +31,7 @@ This application contains **intentional security vulnerabilities** and should **
    ```
 
 3. **Access the application:**
-   Open your browser and go to: `http://localhost:3000`
+   Open your browser and go to: `http://localhost:8000`
 
 ## 🎯 Command Injection Vulnerability
 
