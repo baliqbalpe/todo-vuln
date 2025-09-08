@@ -4,10 +4,6 @@ FROM node:22.12.0-alpine3.20
 # Set the working directory
 WORKDIR /app
 
-# Create a non-root user for security
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001
-
 # Copy package files first for better layer caching
 COPY package*.json ./
 
@@ -17,12 +13,6 @@ RUN npm ci --only=production && \
 
 # Copy application code
 COPY . .
-
-# Change ownership to nodejs user
-RUN chown -R nodejs:nodejs /app
-
-# Switch to non-root user
-USER nodejs
 
 # Expose the port the app runs on
 EXPOSE 8000
