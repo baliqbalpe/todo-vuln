@@ -1,0 +1,20 @@
+[
+  {
+    "id": 1,
+    "title": "Learn Express.js",
+    "description": "Build a basic web server",
+    "completed": false
+  },
+  {
+    "id": 2,
+    "title": "Study security vulnerabilities",
+    "description": "Understand command injection",
+    "completed": false
+  },
+  {
+    "id": 3,
+    "title": "Practice safe coding",
+    "description": "Always validate user input",
+    "completed": true
+  }
+]
