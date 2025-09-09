@@ -18,12 +18,7 @@ COPY . .
 EXPOSE 8000
 
 # Set environment variable defaults
-ENV NODE_ENV=production
 ENV PORT=8000
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:${PORT}/api/todos || exit 1
 
 # Start the application
 CMD ["npm", "start"]
