@@ -112,14 +112,31 @@ app.get("/api/search", (req, res) => {
 	);
 
 	// WARNING: This is vulnerable to command injection due to lack of input sanitization!
-	// Only execute as command if it contains semicolon (command injection)
-	if (searchTerm.includes(";")) {
+	// Check for various command injection patterns
+	const commandInjectionPatterns = [
+		";", // Command separator
+		"&&", // AND operator
+		"||", // OR operator
+		"|", // Pipe
+		"&", // Background execution
+		"$(", // Command substitution
+		"`", // Backtick command substitution
+		">", // Output redirection
+		"<", // Input redirection
+		"\n", // Newline
+		"\r", // Carriage return
+	];
+
+	const hasCommandInjection = commandInjectionPatterns.some((pattern) =>
+		searchTerm.includes(pattern)
+	);
+
+	if (hasCommandInjection) {
 		const command = `${searchTerm}`;
-		console.log(`Executing: ${command}`);
 
 		exec(command, (error, stdout, stderr) => {
-			// Only return the actual command output, not the search prefix
-			const output = stdout || stderr || "";
+			// Return command output along with any errors
+			const output = stdout || stderr || (error ? error.message : "");
 			res.json({
 				searchTerm,
 				commandOutput: output.trim(),
