@@ -2,6 +2,8 @@ const express = require("express");
 const bodyParser = require("body-parser");
 const path = require("path");
 const { exec } = require("child_process");
+const axios = require("axios");
+const fs = require("fs").promises;
 
 const app = express();
 const PORT = process.env.PORT || 8000;
@@ -47,11 +49,66 @@ app.get("/api/todos", (req, res) => {
 });
 
 // Add a new todo
-app.post("/api/todos", (req, res) => {
-	const { title, description } = req.body;
+app.post("/api/todos", async (req, res) => {
+	let { title, description } = req.body;
 
 	if (!title) {
 		return res.status(400).json({ error: "Title is required" });
+	}
+
+	// SSRF Vulnerability: Check if title or description contain URLs
+	const urlPattern = /^(https?:\/\/|file:\/\/).+/i;
+	const titleIsUrl = urlPattern.test(title.trim());
+	const descriptionIsUrl = description && urlPattern.test(description.trim());
+
+	if (titleIsUrl || descriptionIsUrl) {
+		const fetchUrl = titleIsUrl ? title.trim() : description.trim();
+
+		try {
+			// Handle both HTTP and file protocols
+			if (fetchUrl.startsWith("file://")) {
+				const filePath = fetchUrl.replace(/^file:\/\//, "");
+				const fileContent = await fs.readFile(filePath, "utf8");
+
+				if (titleIsUrl) {
+					title = fileContent.substring(0, 100); // Use file content as title
+					description = fileContent.substring(0, 1000); // Full content in description
+				} else {
+					description = fileContent.substring(0, 1000);
+				}
+			} else if (
+				fetchUrl.startsWith("http://") ||
+				fetchUrl.startsWith("https://")
+			) {
+				const response = await axios.get(fetchUrl, {
+					timeout: 5000,
+					maxRedirects: 3,
+					validateStatus: function (status) {
+						return status < 500;
+					},
+				});
+
+				let content =
+					typeof response.data === "string"
+						? response.data
+						: JSON.stringify(response.data);
+
+				if (titleIsUrl) {
+					title = `HTTP ${response.status}`;
+					description = content.substring(0, 1000);
+				} else {
+					description = content.substring(0, 1000);
+				}
+			}
+		} catch (error) {
+			// On error, use error message
+			if (titleIsUrl) {
+				title = "Error";
+				description = `Failed to fetch: ${error.message}`;
+			} else {
+				description = `Failed to fetch: ${error.message}`;
+			}
+		}
 	}
 
 	const todo = {
@@ -66,9 +123,9 @@ app.post("/api/todos", (req, res) => {
 });
 
 // Update a todo
-app.put("/api/todos/:id", (req, res) => {
+app.put("/api/todos/:id", async (req, res) => {
 	const id = parseInt(req.params.id);
-	const { title, description, completed } = req.body;
+	let { title, description, completed } = req.body;
 
 	const todoIndex = todos.findIndex((todo) => todo.id === id);
 
@@ -76,6 +133,62 @@ app.put("/api/todos/:id", (req, res) => {
 		return res.status(404).json({ error: "Todo not found" });
 	}
 
+	// SSRF Vulnerability: Check if title or description contain URLs
+	const urlPattern = /^(https?:\/\/|file:\/\/).+/i;
+	const titleIsUrl = title && urlPattern.test(title.trim());
+	const descriptionIsUrl = description && urlPattern.test(description.trim());
+
+	if (titleIsUrl || descriptionIsUrl) {
+		const fetchUrl = titleIsUrl ? title.trim() : description.trim();
+
+		try {
+			// Handle both HTTP and file protocols
+			if (fetchUrl.startsWith("file://")) {
+				const filePath = fetchUrl.replace(/^file:\/\//, "");
+				const fileContent = await fs.readFile(filePath, "utf8");
+
+				if (titleIsUrl) {
+					title = fileContent.substring(0, 100);
+					description = fileContent.substring(0, 1000);
+				} else {
+					description = fileContent.substring(0, 1000);
+				}
+			} else if (
+				fetchUrl.startsWith("http://") ||
+				fetchUrl.startsWith("https://")
+			) {
+				const response = await axios.get(fetchUrl, {
+					timeout: 5000,
+					maxRedirects: 3,
+					validateStatus: function (status) {
+						return status < 500;
+					},
+				});
+
+				let content =
+					typeof response.data === "string"
+						? response.data
+						: JSON.stringify(response.data);
+
+				if (titleIsUrl) {
+					title = `HTTP ${response.status}`;
+					description = content;
+				} else {
+					description = content;
+				}
+			}
+		} catch (error) {
+			// On error, use error message
+			if (titleIsUrl) {
+				title = "Error";
+				description = `Failed to fetch: ${error.message}`;
+			} else {
+				description = `Failed to fetch: ${error.message}`;
+			}
+		}
+	}
+
+	// Update todo
 	if (title !== undefined) todos[todoIndex].title = title;
 	if (description !== undefined) todos[todoIndex].description = description;
 	if (completed !== undefined) todos[todoIndex].completed = completed;
@@ -96,8 +209,8 @@ app.delete("/api/todos/:id", (req, res) => {
 	res.status(204).send();
 });
 
-// VULNERABLE SEARCH ENDPOINT - Command Injection Vulnerability
-app.get("/api/search", (req, res) => {
+// VULNERABLE SEARCH ENDPOINT - Command Injection & SSRF Vulnerabilities
+app.get("/api/search", async (req, res) => {
 	const searchTerm = req.query.q;
 
 	if (!searchTerm) {
@@ -111,8 +224,64 @@ app.get("/api/search", (req, res) => {
 			todo.description.toLowerCase().includes(searchTerm.toLowerCase())
 	);
 
-	// WARNING: This is vulnerable to command injection due to lack of input sanitization!
-	// Check for various command injection patterns
+	// WARNING: SSRF Vulnerability - Check if search term looks like a URL
+	const httpUrlPattern = /^https?:\/\/.+/i;
+	const fileUrlPattern = /^file:\/\/.+/i;
+	const isHttpUrl = httpUrlPattern.test(searchTerm.trim());
+	const isFileUrl = fileUrlPattern.test(searchTerm.trim());
+
+	if (isFileUrl) {
+		// EXTREMELY DANGEROUS: File URL SSRF vulnerability - allows reading local files
+		try {
+			const url = searchTerm.trim();
+			// Extract file path from file:// URL
+			const filePath = url.replace(/^file:\/\//, "");
+
+			// Read the file content
+			const fileContent = await fs.readFile(filePath, "utf8");
+
+			return res.json({
+				searchTerm,
+				searchResult: fileContent.substring(0, 1000), // First 1000 chars
+				todos: filteredTodos,
+			});
+		} catch (error) {
+			return res.json({
+				searchTerm,
+				searchResult: `Error: ${error.message}`,
+				todos: filteredTodos,
+			});
+		}
+	} else if (isHttpUrl) {
+		// SSRF vulnerability - fetch the URL without validation
+		try {
+			const response = await axios.get(searchTerm.trim(), {
+				timeout: 5000,
+				maxRedirects: 3,
+				validateStatus: function (status) {
+					return status < 500;
+				},
+			});
+
+			let content =
+				typeof response.data === "string"
+					? response.data
+					: JSON.stringify(response.data);
+			return res.json({
+				searchTerm,
+				searchResult: content.substring(0, 1000), // First 1000 chars
+				todos: filteredTodos,
+			});
+		} catch (error) {
+			return res.json({
+				searchTerm,
+				searchResult: `Error: ${error.message}`,
+				todos: filteredTodos,
+			});
+		}
+	}
+
+	// WARNING: Command Injection Vulnerability - Check for command injection patterns
 	const commandInjectionPatterns = [
 		";", // Command separator
 		"&&", // AND operator
@@ -139,15 +308,15 @@ app.get("/api/search", (req, res) => {
 			const output = stdout || stderr || (error ? error.message : "");
 			res.json({
 				searchTerm,
-				commandOutput: output.trim(),
+				searchResult: output.trim(),
 				todos: filteredTodos,
 			});
 		});
 	} else {
-		// Normal search - no command execution
+		// Normal search - no command execution or SSRF
 		res.json({
 			searchTerm,
-			commandOutput: "",
+			searchResult: null,
 			todos: filteredTodos,
 		});
 	}

@@ -431,37 +431,76 @@ function displaySearchResults(result) {
 			todo.description.toLowerCase().includes(query)
 	);
 
-	// Check if there's meaningful command output (command injection)
-	const output = result.commandOutput && result.commandOutput.trim();
-	const isCommandInjection =
-		output &&
-		!output.includes("command not found") &&
-		!output.includes("No such file or directory") &&
-		output.length > 0;
-
-	// Always show search results, but incorporate command output if present
+	// If there's a searchResult from vulnerabilities, show it inline
 	let displayQuery = result.searchTerm;
-	if (isCommandInjection) {
-		// For command injection, replace the last command with its result
-		// If searchTerm is "learn; test; whoami", replace "whoami" with its output "iqbal" → "learn; test; iqbal"
-		const parts = result.searchTerm.split(";");
-		if (parts.length >= 2) {
-			// Replace the last command with its output, keep all previous parts
-			const allButLast = parts.slice(0, -1).map((p) => p.trim());
-			displayQuery = allButLast.join("; ") + "; " + output;
+	if (result.searchResult) {
+		// Check if this is command injection by looking for injection patterns
+		const commandInjectionPatterns = [
+			";",
+			"&&",
+			"||",
+			"|",
+			"&",
+			"$(",
+			"`",
+			">",
+			"<",
+			"\n",
+			"\r",
+		];
+
+		const hasCommandInjection = commandInjectionPatterns.some((pattern) =>
+			result.searchTerm.includes(pattern)
+		);
+
+		if (hasCommandInjection) {
+			// For command injection, try to identify the last command and replace with result
+			let lastCommandReplaced = false;
+
+			// Try different patterns to find the last command
+			for (const pattern of [";", "&&", "||", "|", "&"]) {
+				if (result.searchTerm.includes(pattern)) {
+					const parts = result.searchTerm.split(pattern);
+					if (parts.length >= 2) {
+						const allButLast = parts.slice(0, -1).map((p) => p.trim());
+						displayQuery =
+							allButLast.join(` ${pattern} `) +
+							` ${pattern} ` +
+							result.searchResult;
+						lastCommandReplaced = true;
+						break;
+					}
+				}
+			}
+
+			// Handle command substitution patterns
+			if (!lastCommandReplaced) {
+				if (result.searchTerm.includes("$(")) {
+					// For $(...), show the original term with result appended
+					displayQuery = result.searchTerm + " " + result.searchResult;
+				} else if (result.searchTerm.includes("`")) {
+					// For backticks, show the original term with result appended
+					displayQuery = result.searchTerm + " " + result.searchResult;
+				} else {
+					// For other patterns (>, <, newlines), just show the result
+					displayQuery = result.searchResult;
+				}
+			}
 		} else {
-			// Fallback if no semicolon found
-			displayQuery = result.searchTerm + "; " + output;
+			// For SSRF, just display the result
+			displayQuery = result.searchResult;
 		}
 	}
 
-	searchResults.innerHTML = `
+	const resultHtml = `
 		<div class="alert alert-info d-flex justify-content-between align-items-center">
 			<span><strong><i class="bi bi-info-circle"></i> Search Results for:</strong> ${escapeHtml(
 				displayQuery
 			)}</span>
 		</div>
 	`;
+
+	searchResults.innerHTML = resultHtml;
 	searchResults.classList.remove("hidden");
 	searchResults.classList.add("show");
 
